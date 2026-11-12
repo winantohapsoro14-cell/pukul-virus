@@ -134,6 +134,21 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
 .review b{color:#c25a00}
 .review i{display:block;font-style:normal;font-size:.78rem;color:#5a5f8a;margin-top:2px}
 
+/* Kotak tes kamera dan panduan izin */
+.camBox{display:grid;gap:10px;background:var(--ui-soft);border:2px solid var(--ui-line);border-radius:18px;padding:12px}
+.camRow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#camPreview{width:176px;aspect-ratio:4/3;object-fit:cover;border-radius:12px;background:#2a1650;transform:scaleX(-1);flex:none}
+#camPreview.noflip{transform:none}
+.camSide{flex:1 1 200px;display:grid;gap:8px;justify-items:start}
+.camStatus{font-weight:800}
+.camStatus.ok{color:#1c8a4a}.camStatus.err{color:#d23b1e}
+.camHelp{background:#fff4e5;border:2px solid #ffb44d;border-radius:14px;padding:12px 14px;display:grid;gap:8px}
+.camHelp>b{font-size:1.02rem;color:#8a3b00}
+.camHelp ol{margin:0;padding-left:1.3em;line-height:1.5;font-weight:600}
+.camHelp li+li{margin-top:4px}
+.camHelp code{background:#fff;border:1px solid var(--ui-line);border-radius:6px;padding:0 .35em;font-size:.92em;-webkit-user-select:all;user-select:all}
+.camHelp .row .btn{flex:1 1 150px}
+
 /* Halaman depan */
 #home{background:none;pointer-events:none}
 .hero{margin:auto;width:min(100%,41rem);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:8px 0}
@@ -239,7 +254,7 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
           <select id="setN"><option>5</option><option>10</option><option>15</option><option>20</option></select></label>
         <label class="field"><span>Waktu per soal</span>
           <select id="setSecs"><option value="15">15 detik</option><option value="20">20 detik</option><option value="30">30 detik</option><option value="45">45 detik</option></select></label>
-        <label class="field camOnly"><span>Kamera</span>
+        <label class="field camOnly"><span>Arah kamera (tablet/ponsel)</span>
           <select id="setCam"><option value="user">Depan / webcam</option><option value="environment">Belakang</option></select></label>
         <label class="field camOnly"><span>Kepekaan gerak: <b id="sensLabel">Sedang</b></span>
           <input type="range" id="setSens" min="1" max="5" step="1" value="3"></label>
@@ -247,7 +262,26 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
           <label class="check"><input type="checkbox" id="setSound" checked> Efek suara</label>
           <label class="check"><input type="checkbox" id="setMusic" checked> Musik</label></div>
       </div>
-      <p class="hint camOnly">Di PID: pasang webcam, setiap pemain berdiri sekitar 1–2 meter di depan bagian layarnya sendiri, lalu gerakkan tangan di atas virus. Kamera butuh alamat https atau localhost. Gambar kamera hanya diproses di perangkat ini.</p>
+      <div class="camBox camOnly">
+        <div class="camRow">
+          <video id="camPreview" playsinline muted></video>
+          <div class="camSide">
+            <p class="camStatus" id="camStatus">Tekan "Tes kamera" untuk mencoba kamera sebelum bermain.</p>
+            <label class="field" id="camDevField" hidden><span>Pilih kamera</span><select id="setCamDev"></select></label>
+            <button class="btn small" id="btnCamTest" type="button">Tes kamera</button>
+          </div>
+        </div>
+        <div class="camHelp" id="camHelp" hidden>
+          <b id="camHelpTitle"></b>
+          <ol id="camHelpSteps"></ol>
+          <div class="row">
+            <button class="btn small" id="btnCamRetry" type="button">Coba lagi</button>
+            <button class="btn ghost small" id="btnReload" type="button">Muat ulang halaman</button>
+            <button class="btn ghost small" id="btnNoCam" type="button">Main tanpa kamera</button>
+          </div>
+        </div>
+        <p class="hint">Di PID: pasang webcam, setiap pemain berdiri sekitar 1–2 meter di depan bagian layarnya sendiri, lalu gerakkan tangan di atas virus. Gambar kamera hanya diproses di perangkat ini dan tidak dikirim ke mana pun.</p>
+      </div>
       <p class="msg" id="setupMsg" hidden></p>
       <div class="row">
         <button class="btn primary big" id="btnStart" type="button">Mulai!</button>
@@ -444,7 +478,7 @@ const easeOutBack=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Ma
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];};
 
 /* ---------- Pengaturan dan bank soal ---------- */
-const settings={n:10,secs:20,sens:3,cam:'user',sound:true,music:true,cat:'*',players:2,same:false,input:'touch',names:['Pemain 1','Pemain 2','Pemain 3','Pemain 4']};
+const settings={n:10,secs:20,sens:3,cam:'user',camId:'',sound:true,music:true,cat:'*',players:2,same:false,input:'touch',names:['Pemain 1','Pemain 2','Pemain 3','Pemain 4']};
 let bankText=DEFAULT_BANK,bank=parseBank(DEFAULT_BANK).questions;
 try{
   const s=JSON.parse(localStorage.getItem(SKEY)||'null');
@@ -1163,26 +1197,120 @@ const Music={on:false,timer:0,next:0,step:0,
 function haptic(p){try{if(navigator.vibrate)navigator.vibrate(p);}catch(e){}}
 
 /* ---------- Kamera dan deteksi gerak ---------- */
+function camEnv(){
+  const ua=navigator.userAgent||'';
+  const os=/Android/i.test(ua)?'android':/Windows/i.test(ua)?'windows':/CrOS/i.test(ua)?'chromeos':/Mac OS|Macintosh/i.test(ua)?'mac':'other';
+  let framed=false;try{framed=window.self!==window.top;}catch(e){framed=true;}
+  return {os,framed,secure:!!window.isSecureContext,api:!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)};
+}
+async function camPermState(){try{const r=await navigator.permissions.query({name:'camera'});return r.state;}catch(e){return 'unknown';}}
 async function startCamera(){
   stopCamera();
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw {name:'NoApi'};
-  camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:settings.cam,width:{ideal:640},height:{ideal:480}},audio:false});
-  cam.srcObject=camStream;await cam.play();
-  mirror=settings.cam==='user';camOn=true;motionReady=false;
+  const env=camEnv();
+  if(!env.api)throw {name:env.framed?'Framed':env.secure?'NoApi':'Insecure'};
+  // Dicoba bertahap: kamera pilihan guru, arah kamera, lalu kamera apa saja
+  const base={width:{ideal:640},height:{ideal:480}};
+  const tries=[];
+  if(settings.camId)tries.push({video:Object.assign({deviceId:{exact:settings.camId}},base),audio:false});
+  tries.push({video:Object.assign({facingMode:settings.cam},base),audio:false});
+  tries.push({video:true,audio:false});
+  let stream=null,lastErr=null;
+  for(const c of tries){
+    try{stream=await navigator.mediaDevices.getUserMedia(c);break;}
+    catch(e){lastErr=e;if(e&&/NotAllowed|Security|PermissionDenied/.test(e.name))break;}
+  }
+  if(!stream)throw lastErr||{name:'Unknown'};
+  camStream=stream;
+  const tr=stream.getVideoTracks()[0],st=tr&&tr.getSettings?tr.getSettings():{};
+  mirror=st.facingMode?st.facingMode!=='environment':settings.cam==='user';
+  cam.srcObject=stream;const p1=cam.play();if(p1&&p1.catch)p1.catch(()=>{});
+  const pv=$('camPreview');pv.srcObject=stream;pv.classList.toggle('noflip',!mirror);const p2=pv.play();if(p2&&p2.catch)p2.catch(()=>{});
+  camOn=true;motionReady=false;
   cam.classList.add('on');cam.classList.toggle('noflip',!mirror);
+  if(tr)tr.addEventListener('ended',()=>{if(camStream===stream){stopCamera();if(mode==='play')setPaused(true);setCamStatus('Kamera terputus. Sambungkan lagi lalu tekan Tes kamera.','err');}});
 }
 function stopCamera(){
   camOn=false;cam.classList.remove('on');
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
   cam.srcObject=null;
+  const pv=$('camPreview');if(pv)pv.srcObject=null;
 }
-function cameraError(e){
-  const n=e&&e.name;
-  if(n==='NoApi')return 'Kamera tidak bisa dipakai di alamat ini. Buka game lewat https:// atau localhost, atau pilih Sentuh / mouse / keyboard.';
-  if(n==='NotAllowedError'||n==='SecurityError')return 'Izin kamera ditolak. Izinkan kamera untuk situs ini di pengaturan peramban, lalu coba lagi.';
-  if(n==='NotFoundError'||n==='OverconstrainedError')return 'Kamera tidak ditemukan. Sambungkan webcam atau pilih Sentuh / mouse / keyboard.';
-  if(n==='NotReadableError')return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi itu lalu coba lagi.';
-  return 'Kamera tidak bisa dibuka. Coba lagi atau pilih Sentuh / mouse / keyboard.';
+async function listCameras(){
+  try{
+    const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    const sel=$('setCamDev');sel.replaceChildren();
+    const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o);};
+    add('','Otomatis');
+    ds.forEach((d,i)=>add(d.deviceId,d.label||('Kamera '+(i+1))));
+    sel.value=settings.camId&&ds.some(d=>d.deviceId===settings.camId)?settings.camId:'';
+    $('camDevField').hidden=ds.length<2;
+  }catch(e){}
+}
+// Panduan sesuai penyebab: alamat tidak aman, pratinjau, izin situs, izin sistem, kamera tidak ada, kamera dipakai aplikasi lain
+function camAdvice(e){
+  const env=camEnv(),n=(e&&e.name)||'',msg=String((e&&e.message)||'');
+  const A=env.os==='android',Wn=env.os==='windows';
+  const osPerm=A?'Buka Pengaturan Android → Aplikasi → Chrome → Izin → Kamera → pilih "Izinkan", lalu kembali ke Chrome.'
+    :Wn?'Buka Pengaturan Windows → Privasi & keamanan → Kamera. Nyalakan "Akses kamera" dan "Izinkan aplikasi desktop mengakses kamera".'
+    :'Pastikan pengaturan sistem perangkat mengizinkan Chrome memakai kamera.';
+  const noCam='Sementara itu game tetap bisa dimainkan dengan sentuhan: tekan "Main tanpa kamera".';
+  if(n==='Framed'||(env.framed&&/NotAllowed|Security/.test(n)))return {t:'Game sedang dibuka di dalam pratinjau, bukan di tab Chrome biasa.',s:[
+    'Buka file game langsung di Chrome, bukan dari pratinjau WhatsApp, Google Drive, atau aplikasi lain.',
+    'Jika file ada di Google Drive atau WhatsApp: unduh dulu, lalu buka file hasil unduhan dengan Chrome.',noCam]};
+  if(n==='Insecure'||n==='NoApi')return {t:'Chrome tidak memberi akses kamera untuk alamat ini ('+location.protocol.replace(':','')+').',s:A?[
+    'Di PID atau tablet Android, Chrome hanya mengizinkan kamera untuk alamat yang diawali `https://` atau `http://localhost`. File yang dibuka dari pengelola file tidak termasuk, jadi kamera selalu ditolak.',
+    'Cara paling mudah: unggah file game ke hosting https gratis (misalnya GitHub Pages), lalu buka tautannya di Chrome PID.',
+    'Cara tanpa internet: pasang aplikasi server web lokal di PID, taruh file game di foldernya, lalu buka alamat `http://localhost:…` yang ditunjukkan aplikasi itu di Chrome.',noCam]:[
+    'Buka game lewat alamat `https://` atau `http://localhost`, atau seret file game langsung ke jendela Chrome di komputer.',
+    'Jangan membuka dari pratinjau aplikasi lain.',noCam]};
+  if(/NotAllowed|Security|PermissionDenied/.test(n)){
+    if(/system/i.test(msg))return {t:'Kamera diblokir oleh pengaturan perangkat, bukan oleh game.',s:[osPerm,'Tekan "Muat ulang halaman", lalu tekan Tes kamera lagi.']};
+    if(/dismiss/i.test(msg))return {t:'Jendela izin kamera tertutup sebelum dipilih.',s:['Tekan "Coba lagi", lalu pilih "Izinkan" pada jendela yang muncul di bagian atas Chrome.']};
+    return {t:'Chrome sedang memblokir kamera untuk halaman ini.',s:[
+      'Ketuk ikon di kiri bilah alamat Chrome (gembok, huruf "i", atau ikon setelan), pilih Izin atau Setelan situs → Kamera → Izinkan.',
+      'Jika ada ikon kamera bercoret di kanan bilah alamat, ketuk ikon itu lalu pilih "Selalu izinkan".',
+      'Atau ketik `chrome://settings/content/camera` di bilah alamat, lalu hapus alamat game ini dari daftar "Tidak diizinkan".',
+      osPerm,
+      'Tekan "Muat ulang halaman", lalu Tes kamera lagi. Jika tetap ditolak tanpa muncul pertanyaan izin, kamera kemungkinan dikunci oleh pengelola PID (admin sekolah atau vendor).']};
+  }
+  if(/NotFound|DevicesNotFound|Overconstrained/.test(n))return {t:'Kamera tidak ditemukan.',s:[
+    'Pastikan webcam terpasang. Untuk webcam USB, cabut lalu colok lagi, atau coba port USB lain.',
+    'Tunggu beberapa detik, lalu tekan "Coba lagi".',noCam]};
+  if(/NotReadable|TrackStart|Abort/.test(n))return {t:'Kamera sedang dipakai aplikasi lain atau macet.',s:[
+    'Tutup aplikasi lain yang memakai kamera (aplikasi kamera bawaan PID, Zoom, Meet, atau tab Chrome lain).',
+    'Jika memakai webcam USB, cabut lalu colok lagi.',
+    'Tekan "Coba lagi". Jika belum berhasil, nyalakan ulang PID.']};
+  return {t:'Kamera tidak bisa dibuka ('+(n||'tidak diketahui')+').',s:['Tekan "Muat ulang halaman", lalu Tes kamera lagi.',osPerm,noCam]};
+}
+function setCamStatus(t,kind){const el=$('camStatus');el.textContent=t;el.className='camStatus'+(kind?' '+kind:'');}
+function hideCamHelp(){$('camHelp').hidden=true;}
+function showCamHelp(e){
+  const a=camAdvice(e);
+  $('camHelpTitle').textContent=a.t;
+  const ol=$('camHelpSteps');ol.replaceChildren();
+  for(const step of a.s){
+    const li=document.createElement('li');
+    step.split('`').forEach((part,i)=>{if(!part)return;if(i%2){const c=document.createElement('code');c.textContent=part;li.appendChild(c);}else li.appendChild(document.createTextNode(part));});
+    ol.appendChild(li);
+  }
+  $('camHelp').hidden=false;
+  setCamStatus('Kamera belum bisa dipakai.','err');
+}
+async function testCamera(){
+  readSetup();hideCamHelp();setCamStatus('Membuka kamera... Jika muncul pertanyaan izin, pilih "Izinkan".','');
+  try{await startCamera();}
+  catch(e){showCamHelp(e);try{$('camHelp').scrollIntoView({behavior:'smooth',block:'center'});}catch(_){}return false;}
+  setCamStatus('Kamera siap! Coba gerakkan tangan di depan kamera.','ok');
+  listCameras();
+  return true;
+}
+async function camPrecheck(){
+  if(settings.input!=='camera'){hideCamHelp();return;}
+  if(camOn){setCamStatus('Kamera siap!','ok');hideCamHelp();return;}
+  setCamStatus('Tekan "Tes kamera" untuk mencoba kamera sebelum bermain.','');hideCamHelp();
+  const env=camEnv();
+  if(!env.api){showCamHelp({name:env.framed?'Framed':env.secure?'NoApi':'Insecure'});return;}
+  if(await camPermState()==='denied')showCamHelp({name:'NotAllowedError',message:'Permission denied'});
 }
 function drawCover(c,video,dw,dh,mir){
   const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh)return;
@@ -1526,7 +1654,7 @@ function fillSetup(){
   $('setSound').checked=!!settings.sound;$('setMusic').checked=!!settings.music;
   $('sensLabel').textContent=SENS_LABELS[settings.sens-1]||'Sedang';
   document.querySelectorAll('.camOnly').forEach(el=>el.hidden=settings.input!=='camera');
-  buildNames();setupMsg('');
+  buildNames();setupMsg('');camPrecheck();
 }
 function buildNames(){
   const box=$('names');box.replaceChildren();
@@ -1555,7 +1683,7 @@ function buildKeyHelp(){
 }
 $('segPlayers').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;settings.players=+b.dataset.v;setSeg('segPlayers',settings.players);buildNames();saveSettings();});
 $('segInput').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;settings.input=b.dataset.v;setSeg('segInput',settings.input);
-  document.querySelectorAll('.camOnly').forEach(el=>el.hidden=settings.input!=='camera');setupMsg('');saveSettings();});
+  document.querySelectorAll('.camOnly').forEach(el=>el.hidden=settings.input!=='camera');setupMsg('');saveSettings();camPrecheck();});
 $('setSens').addEventListener('input',()=>{$('sensLabel').textContent=SENS_LABELS[(+$('setSens').value)-1];});
 ['setCat','setN','setSecs','setSame','setCam','setSens','setSound','setMusic'].forEach(id=>$(id).addEventListener('change',readSetup));
 $('setMusic').addEventListener('change',()=>{if(!settings.music)Music.stop();});
@@ -1568,11 +1696,18 @@ $('setupBack').addEventListener('click',()=>{stopCamera();show('home');});
 async function launch(){
   readSetup();ensureAudio();setupMsg('');
   if(settings.input==='camera'){
-    if(!camOn){setupMsg('Membuka kamera...');try{await startCamera();}catch(e){setupMsg(cameraError(e));return;}}
+    if(!camOn&&!(await testCamera())){if($('setup').hidden)show('setup');return;}
   }else stopCamera();
   setupMsg('');startGame();
 }
 $('btnStart').addEventListener('click',launch);
+$('btnCamTest').addEventListener('click',()=>{ensureAudio();testCamera();});
+$('btnCamRetry').addEventListener('click',()=>testCamera());
+$('btnReload').addEventListener('click',()=>location.reload());
+$('btnNoCam').addEventListener('click',()=>{stopCamera();settings.input='touch';saveSettings();setSeg('segInput','touch');
+  document.querySelectorAll('.camOnly').forEach(el=>el.hidden=true);hideCamHelp();});
+$('setCamDev').addEventListener('change',()=>{settings.camId=$('setCamDev').value;saveSettings();testCamera();});
+$('setCam').addEventListener('change',()=>{if(camOn)testCamera();});
 $('btnQuit').addEventListener('click',toMenu);
 $('btnPause').addEventListener('click',()=>setPaused(!paused));
 $('btnResume').addEventListener('click',()=>setPaused(false));
