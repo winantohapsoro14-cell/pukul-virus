@@ -149,6 +149,12 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
 .camHelp code{background:#fff;border:1px solid var(--ui-line);border-radius:6px;padding:0 .35em;font-size:.92em;-webkit-user-select:all;user-select:all}
 .camHelp .row .btn{flex:1 1 150px}
 
+.meter{height:12px;border-radius:7px;background:#e3e9fb;overflow:hidden}
+.meter i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#2fc06b,#ffd23f 70%,#ff7a63);transform-origin:left;transform:scaleX(0)}
+.check.wrap{align-items:flex-start}
+.check.wrap span{font-weight:700;line-height:1.35}
+.check.wrap small{display:block;font-weight:600;color:#5a5f8a}
+
 /* Halaman depan */
 #home{background:none;pointer-events:none}
 .hero{margin:auto;width:min(100%,41rem);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:8px 0}
@@ -252,6 +258,8 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
         <label class="field"><span>Kategori soal</span><select id="setCat"></select></label>
         <label class="field"><span>Jumlah soal</span>
           <select id="setN"><option>5</option><option>10</option><option>15</option><option>20</option></select></label>
+        <label class="field"><span>Gerak virus</span>
+          <select id="setMove"><option value="normal">Normal</option><option value="slow">Lambat</option><option value="still">Diam (melayang di tempat)</option></select></label>
         <label class="field"><span>Waktu per soal</span>
           <select id="setSecs"><option value="15">15 detik</option><option value="20">20 detik</option><option value="30">30 detik</option><option value="45">45 detik</option></select></label>
         <label class="field camOnly"><span>Arah kamera (tablet/ponsel)</span>
@@ -263,6 +271,13 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
           <label class="check"><input type="checkbox" id="setMusic" checked> Musik</label></div>
       </div>
       <div class="camBox camOnly">
+        <div class="field"><span>Gerakan memukul</span>
+          <div class="seg" id="segHit"><button type="button" data-v="wave">Kibaskan tangan</button><button type="button" data-v="clap">Tepuk tangan</button></div></div>
+        <p class="hint" id="hitHint"></p>
+        <label class="check wrap"><input type="checkbox" id="setAssist" checked><span>Bantuan bidik<small>Area pukul lebih besar, virus bergerak lebih lambat dan berhenti saat tangan mendekat.</small></span></label>
+        <div class="field clapOnly"><span>Kepekaan tepuk: <b id="clapLabel">Sedang</b></span>
+          <input type="range" id="setClap" min="1" max="5" step="1" value="3">
+          <div class="meter" title="Kekuatan suara yang didengar mikrofon"><i id="micMeter"></i></div></div>
         <div class="camRow">
           <video id="camPreview" playsinline muted></video>
           <div class="camSide">
@@ -303,7 +318,8 @@ textarea{min-height:42vh;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas
         <div><h3>Cara memukul</h3>
           <ul>
             <li><b>Sentuh atau klik</b> virus (atau labelnya). Di PID, beberapa pemain bisa menyentuh bersamaan.</li>
-            <li><b>Kamera:</b> gerakkan tangan di atas virus. Lingkaran kuning yang penuh berarti pukulan.</li>
+            <li><b>Kamera, kibaskan tangan:</b> kibaskan tangan tepat di depan virus. Lingkaran kuning yang penuh berarti pukulan.</li>
+            <li><b>Kamera, tepuk tangan:</b> arahkan kedua tangan ke virus sampai virus itu bersinar kuning, lalu tepuk sekali. Mode ini memakai mikrofon untuk mendengar tepukan.</li>
             <li><b>Keyboard:</b> tekan tombol yang tertera di label jawaban.</li>
           </ul></div>
         <div class="keys" id="keyHelp"></div>
@@ -466,7 +482,7 @@ function diffMask(cur,prev,mask,diff){
 const $=id=>document.getElementById(id);
 const FONT='"Nunito","Avenir Next Rounded","Trebuchet MS","Segoe UI",system-ui,sans-serif';
 const DFONT='"Fredoka","Baloo 2",'+FONT;
-const DIFF=26;                       // selisih kecerahan minimum agar piksel kamera dianggap bergerak
+const DIFF=22;                       // selisih kecerahan minimum agar piksel kamera dianggap bergerak
 const TB=48;                         // tinggi bilah atas saat bermain
 const SKEY='pukulVirus3d.settings.v1',BKEY='pukulVirus3d.bank.v1',BEST='pukulVirus3d.best';
 const PCOL=['#ff4d6d','#3fa9ff','#4be07a','#ffc94a'];
@@ -478,7 +494,7 @@ const easeOutBack=t=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Ma
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];};
 
 /* ---------- Pengaturan dan bank soal ---------- */
-const settings={n:10,secs:20,sens:3,cam:'user',camId:'',sound:true,music:true,cat:'*',players:2,same:false,input:'touch',names:['Pemain 1','Pemain 2','Pemain 3','Pemain 4']};
+const settings={n:10,secs:20,sens:3,cam:'user',camId:'',hitMode:'wave',assist:true,vmove:'normal',clapSens:3,sound:true,music:true,cat:'*',players:2,same:false,input:'touch',names:['Pemain 1','Pemain 2','Pemain 3','Pemain 4']};
 let bankText=DEFAULT_BANK,bank=parseBank(DEFAULT_BANK).questions;
 try{
   const s=JSON.parse(localStorage.getItem(SKEY)||'null');
@@ -818,7 +834,7 @@ function layoutVirus(z,v){
 function makeVirus(z,it,i,n,ci,key){
   const v={label:it.label||'',correct:!!it.correct,key:key||'',ci,state:'alive',alpha:1,fade:false,reveal:false,flee:false,fleeK:0,lvl:0,
     x:0,y:0,h:Math.random()*6.283,sp:0,zd:-30,zph:Math.random()*6.283,spawn:0,ry:Math.random()*6.283,rx:0,
-    spin:(.5+Math.random()*.6)*(Math.random()<.5?-1:1),deadT:0,mockT:0,hitAt:0,blink:1+Math.random()*4,
+    spin:(.5+Math.random()*.6)*(Math.random()<.5?-1:1),deadT:0,mockT:0,hitAt:0,peak:0,blink:1+Math.random()*4,
     R:30,fs:14,lines:[],pad:0,lh:0,plw:0,plh:0,bw:0,top:0,bottom:0,badge:0};
   layoutVirus(z,v);
   const a=z.pa;
@@ -860,7 +876,14 @@ function updateZone(z,dt){
   const p=z.player,moving=!p||p.phase==='ask';
   if(moving&&dt>0){
     const alive=z.viruses.filter(v=>v.state==='alive');
-    alive.forEach(v=>stepV(v,dt,z.pa));separate(alive);alive.forEach(v=>clampV(v,z.pa));
+    let sf=1;
+    if(p){
+      sf=settings.vmove==='slow'?.5:settings.vmove==='still'?0:1;
+      if(settings.input==='camera'&&settings.assist)sf*=.65;
+    }
+    const lockT=hitThr()*.3,lockOn=p&&settings.input==='camera'&&settings.assist;
+    if(sf>0)alive.forEach(v=>{if(!(lockOn&&v.peak>lockT))stepV(v,dt*sf,z.pa);});   // virus berhenti saat tangan mendekat
+    separate(alive);alive.forEach(v=>clampV(v,z.pa));
   }
   for(const v of z.viruses){
     v.spawn=Math.min(1,v.spawn+dt*1.9);
@@ -1007,7 +1030,8 @@ function drawVirus(z,v){
   const col=VCOL[v.ci];
   if(v.state==='mock'){const pu=.5+.5*Math.sin(gt*.02);emis=[.32*pu,0,.02];}
   else if(v.reveal){const pu=.5+.5*Math.sin(gt*.012);emis=[.05,.38*pu,.12*pu];}
-  else if(v.lvl>.03&&v.state==='alive'){const k=Math.min(1,v.lvl/sensToThreshold(settings.sens))*.4;emis=[k,k*.8,0];}
+  else if(z.player&&z.player.target===v&&v.state==='alive'){const k=.25+.2*Math.sin(gt*.02);emis=[k,k*.8,0];}
+  else if(v.lvl>.03&&v.state==='alive'&&settings.input==='camera'&&settings.hitMode!=='clap'){const k=Math.min(1,v.lvl/(hitThr()*1.15))*.4;emis=[k,k*.8,0];}
   compose(M,w[0],w[1],w[2],v.rx,v.ry,0,base*kx,base*ky,base*kz);
   if(alpha<.98){gl.colorMask(false,false,false,false);drawMesh(MESH.virus,M,col,alpha,emis,.55,.85,.06);gl.colorMask(true,true,true,true);}
   drawMesh(MESH.virus,M,col,alpha,emis,.55,.85,.06);
@@ -1066,6 +1090,11 @@ function drawMallet(z,m){
 function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
 function drawOverlay(){
   fx.setTransform(dpr,0,0,dpr,0,0);fx.clearRect(0,0,W,H);
+  if(mode==='play'&&camOn&&settings.input==='camera'&&mask&&motionReady){      // jejak gerak tangan agar siswa tahu posisi tangannya
+    const cw=W/mw,ch=H/mh;fx.fillStyle='rgba(255,236,140,.32)';fx.beginPath();
+    for(let y=0;y<mh;y++){const row=y*mw;for(let x=0;x<mw;x++)if(mask[row+x])fx.rect(x*cw+cw*.18,y*ch+ch*.18,cw*.64,ch*.64);}
+    fx.fill();
+  }
   for(const z of zones){
     fx.save();fx.beginPath();fx.rect(z.x,z.y,z.w,z.h);fx.clip();
     for(const v of z.viruses)if(v.label)drawPlate(z,v);
@@ -1121,8 +1150,14 @@ function drawPlate(z,v){
     else{fx.moveTo(sx-r*.35,sy-r*.35);fx.lineTo(sx+r*.35,sy+r*.35);fx.moveTo(sx+r*.35,sy-r*.35);fx.lineTo(sx-r*.35,sy+r*.35);}
     fx.stroke();
   }
-  if(settings.input==='camera'&&v.state==='alive'&&v.lvl>.03&&z.player){
-    const frac=Math.min(1,v.lvl/sensToThreshold(settings.sens));
+  if(settings.input==='camera'&&settings.hitMode==='clap'&&v.state==='alive'&&z.player&&z.player.target===v){
+    fx.save();fx.strokeStyle='#ffd23f';fx.lineWidth=6;fx.setLineDash([12,9]);fx.lineDashOffset=-gt*.05;
+    fx.beginPath();fx.arc(v.x,v.y,v.R*1.75,0,6.283);fx.stroke();fx.restore();
+    fx.globalAlpha=a;fx.font='900 '+Math.max(13,v.fs*.9)+'px '+FONT;fx.textAlign='center';fx.textBaseline='bottom';
+    fx.lineWidth=4;fx.strokeStyle='rgba(20,6,26,.85)';fx.strokeText('TEPUK!',v.x,v.y-v.R*1.85);
+    fx.fillStyle='#ffd23f';fx.fillText('TEPUK!',v.x,v.y-v.R*1.85);
+  }else if(settings.input==='camera'&&settings.hitMode!=='clap'&&v.state==='alive'&&v.lvl>.03&&z.player){
+    const frac=Math.min(1,v.lvl/(hitThr()*1.15));
     fx.strokeStyle='#ffc94a';fx.lineWidth=6;fx.lineCap='round';
     fx.beginPath();fx.arc(v.x,v.y,v.R*1.75,-Math.PI/2,-Math.PI/2+frac*6.283);fx.stroke();
   }
@@ -1160,7 +1195,8 @@ function noiseAt(t,dur,freq,vol,type,bus){
   g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
   s.connect(f);f.connect(g);g.connect(bus);s.start(t);s.stop(t+dur+.02);
 }
-function sfx(fn){if(!settings.sound||!ac)return;try{fn(ac.currentTime);}catch(e){}}
+let quietUntil=0;
+function sfx(fn){if(!settings.sound||!ac)return;quietUntil=performance.now()+350;try{fn(ac.currentTime);}catch(e){}}
 function seq(t,notes,type,vol){for(const [f,d] of notes){osc(f,t,d,type,vol,sfxBus);t+=d*.8;}}
 const SFX={
   whack:()=>sfx(t=>{noiseAt(t,.16,1300,.6,'lowpass',sfxBus);osc(190,t,.2,'sine',.55,sfxBus,50);}),
@@ -1176,7 +1212,7 @@ const SFX={
 const CHORDS=[{b:110,n:[440,523.25,659.25]},{b:87.31,n:[349.23,440,523.25]},{b:130.81,n:[523.25,659.25,783.99]},{b:98,n:[392,493.88,587.33]}];
 const ARP=[0,1,2,1,0,2,1,2];
 const Music={on:false,timer:0,next:0,step:0,
-  start(){ensureAudio();if(!ac||this.on||!settings.music)return;this.on=true;this.next=ac.currentTime+.15;this.step=0;this.timer=setInterval(()=>this.tick(),50);},
+  start(){ensureAudio();if(!ac||this.on||!settings.music||clapMode())return;this.on=true;this.next=ac.currentTime+.15;this.step=0;this.timer=setInterval(()=>this.tick(),50);},
   stop(){this.on=false;clearInterval(this.timer);},
   tick(){
     if(!ac||!this.on)return;
@@ -1284,8 +1320,13 @@ function camAdvice(e){
 }
 function setCamStatus(t,kind){const el=$('camStatus');el.textContent=t;el.className='camStatus'+(kind?' '+kind:'');}
 function hideCamHelp(){$('camHelp').hidden=true;}
-function showCamHelp(e){
+function showCamHelp(e,mic){
   const a=camAdvice(e);
+  if(mic){                                                        // kalimat yang sama, untuk mikrofon
+    const sw=t=>t.replace(/(?<!Tes )kamera/g,'mikrofon').replace(/Kamera/g,'Mikrofon').replace(/content\/camera/g,'content/microphone').replace(/webcam/g,'mikrofon');
+    a.t=sw(a.t);a.s=a.s.map(sw);
+    a.s.push('Atau pilih gerakan "Kibaskan tangan", yang tidak memakai mikrofon.');
+  }
   $('camHelpTitle').textContent=a.t;
   const ol=$('camHelpSteps');ol.replaceChildren();
   for(const step of a.s){
@@ -1294,19 +1335,36 @@ function showCamHelp(e){
     ol.appendChild(li);
   }
   $('camHelp').hidden=false;
-  setCamStatus('Kamera belum bisa dipakai.','err');
+  if(!mic)setCamStatus('Kamera belum bisa dipakai.','err');
 }
 async function testCamera(){
   readSetup();hideCamHelp();setCamStatus('Membuka kamera... Jika muncul pertanyaan izin, pilih "Izinkan".','');
   try{await startCamera();}
   catch(e){showCamHelp(e);try{$('camHelp').scrollIntoView({behavior:'smooth',block:'center'});}catch(_){}return false;}
-  setCamStatus('Kamera siap! Coba gerakkan tangan di depan kamera.','ok');
   listCameras();
+  if(clapMode()){
+    if(!micAn){
+      setCamStatus('Kamera siap. Membuka mikrofon untuk mendengar tepukan...','');
+      try{await startMic();}
+      catch(e){showCamHelp(e,true);setCamStatus('Kamera siap, tetapi mikrofon belum bisa dipakai. Mode tepuk butuh mikrofon, atau pilih "Kibaskan tangan".','err');return false;}
+    }
+    setCamStatus('Kamera dan mikrofon siap! Coba tepuk tangan sekali.','ok');
+  }else setCamStatus('Kamera siap! Coba kibaskan tangan di depan kamera.','ok');
   return true;
 }
+function syncHitUI(){
+  setSeg('segHit',settings.hitMode);
+  const clap=settings.hitMode==='clap';
+  document.querySelectorAll('.clapOnly').forEach(el=>el.hidden=settings.input!=='camera'||!clap);
+  $('hitHint').textContent=clap
+    ?'Arahkan kedua tangan ke virus sampai virus itu bersinar kuning bertuliskan TEPUK!, lalu tepuk sekali. Kamera menentukan virusnya, mikrofon mendengar tepukannya. Musik dimatikan otomatis agar tidak dikira tepukan.'
+    :'Kibaskan tangan tepat di depan virus. Satu kibasan cepat sudah cukup. Lingkaran kuning yang penuh berarti kena.';
+}
 async function camPrecheck(){
-  if(settings.input!=='camera'){hideCamHelp();return;}
-  if(camOn){setCamStatus('Kamera siap!','ok');hideCamHelp();return;}
+  syncHitUI();
+  if(settings.input!=='camera'){hideCamHelp();stopMic();return;}
+  if(!clapMode())stopMic();
+  if(camOn&&(!clapMode()||micAn)){setCamStatus('Kamera siap!','ok');hideCamHelp();return;}
   setCamStatus('Tekan "Tes kamera" untuk mencoba kamera sebelum bermain.','');hideCamHelp();
   const env=camEnv();
   if(!env.api){showCamHelp({name:env.framed?'Framed':env.secure?'NoApi':'Insecure'});return;}
@@ -1317,8 +1375,17 @@ function drawCover(c,video,dw,dh,mir){
   const sc=Math.max(dw/vw,dh/vh),sw=dw/sc,sh=dh/sc,sx=(vw-sw)/2,sy=(vh-sh)/2;
   c.save();if(mir){c.translate(dw,0);c.scale(-1,1);}c.drawImage(video,sx,sy,sw,sh,0,0,dw,dh);c.restore();
 }
+let vfNew=true,vfLast=-1,vfArmed=false;
+function armFrameCallback(){
+  if(vfArmed||!cam.requestVideoFrameCallback)return;vfArmed=true;
+  const f=()=>{vfNew=true;if(camStream)cam.requestVideoFrameCallback(f);else vfArmed=false;};
+  cam.requestVideoFrameCallback(f);
+}
 function sampleMotion(){
   if(!camOn||cam.readyState<2||!cam.videoWidth)return false;
+  // hanya frame kamera yang benar-benar baru yang dibandingkan, supaya gerakan tidak "terbagi dua"
+  if(cam.requestVideoFrameCallback){armFrameCallback();if(!vfNew)return false;vfNew=false;}
+  else{if(cam.currentTime===vfLast)return false;vfLast=cam.currentTime;}
   drawCover(mctx,cam,mw,mh,mirror);
   const d=mctx.getImageData(0,0,mw,mh).data;
   for(let i=0,j=0;i<gCur.length;i++,j+=4)gCur[i]=d[j]*.3+d[j+1]*.59+d[j+2]*.11;
@@ -1326,21 +1393,76 @@ function sampleMotion(){
   globalMotion=diffMask(gCur,gPrev,mask,DIFF);
   return true;
 }
+function hitThr(){return sensToThreshold(settings.sens);}
+function clapMode(){return settings.input==='camera'&&settings.hitMode==='clap';}
+function cellCount(x0,y0,x1,y1){
+  const ax=Math.max(0,Math.floor(x0)),ay=Math.max(0,Math.floor(y0)),bx=Math.min(mw,Math.ceil(x1)),by=Math.min(mh,Math.ceil(y1));
+  let c=0;for(let y=ay;y<by;y++){const row=y*mw;for(let x=ax;x<bx;x++)c+=mask[row+x];}
+  return c;
+}
 function detectHits(){
   if(!sampleMotion())return;
-  const thr=sensToThreshold(settings.sens),sx=mw/W,sy=mh/H;
+  const thr=hitThr(),clap=clapMode(),grow=settings.assist?1.4:1.05,cw=W/mw,ch=H/mh;
   for(const p of players){
-    const z=p.zone;
-    if(p.phase!=='ask'||gt<p.graceUntil){z.viruses.forEach(v=>v.lvl*=.5);continue;}
-    let best=null,bestLvl=0;
+    const z=p.zone;p.target=null;
+    if(p.phase!=='ask'||gt<p.graceUntil){z.viruses.forEach(v=>{v.lvl*=.5;v.peak*=.7;});continue;}
+    let best=null,bestLvl=0,tgt=null,tgtPk=0;
     for(const v of z.viruses){
       if(v.state!=='alive')continue;
-      const b=vBox(v);
-      const frac=rectFraction(mask,mw,mh,b.x0*sx,b.y0*sy,b.x1*sx,b.y1*sy);
-      v.lvl=globalMotion>.5?0:v.lvl*.55+frac*.45;     // gerakan seluruh layar (kamera goyang, lampu berubah) diabaikan
-      if(v.lvl>thr&&v.lvl>bestLvl){best=v;bestLvl=v.lvl;}
+      // area dasar = badan virus; bantuan bidik memperlebar area hitung tanpa menaikkan ambang
+      const r=v.R*1.45,g=r*grow;
+      const base=Math.max(1,(2*r/cw)*(2*r/ch));
+      const cnt=cellCount((v.x-g)/cw,(v.y-g)/ch,(v.x+g)/cw,(v.y+g)/ch);
+      const frac=globalMotion>.5?0:Math.min(1,cnt/base);     // gerakan seluruh layar (kamera goyang, lampu berubah) diabaikan
+      v.lvl=v.lvl*.5+frac;                                    // satu kibasan kuat langsung cukup, dua kibasan sedang juga cukup
+      v.peak=Math.max(frac,v.peak*.88);
+      if(!clap&&v.lvl>thr*1.15&&v.lvl>bestLvl){best=v;bestLvl=v.lvl;}
+      if(v.peak>tgtPk){tgt=v;tgtPk=v.peak;}
     }
+    if(clap&&tgtPk>thr*.4)p.target=tgt;
     if(best)whack(p,best);
+  }
+}
+
+/* ---------- Mikrofon untuk mode tepuk tangan ---------- */
+const CLAP_THR=[.5,.38,.28,.2,.14];
+let micStream=null,micAn=null,micBuf=null,micFloor=.01,micPrev=0,micLevel=0,lastClap=0,clapFlashUntil=0;
+async function startMic(){
+  stopMic();ensureAudio();
+  if(!ac)throw {name:'NoAudio'};
+  const env=camEnv();
+  if(!env.api)throw {name:env.framed?'Framed':env.secure?'NoApi':'Insecure'};
+  // peredam bising dimatikan karena justru menghapus bunyi tepukan
+  const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
+  micStream=st;
+  const src=ac.createMediaStreamSource(st);
+  micAn=ac.createAnalyser();micAn.fftSize=2048;micAn.smoothingTimeConstant=0;
+  src.connect(micAn);micBuf=new Float32Array(micAn.fftSize);micFloor=.01;micPrev=0;
+}
+function stopMic(){
+  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
+  micAn=null;micLevel=0;
+}
+function pollClap(){
+  if(!micAn)return false;
+  micAn.getFloatTimeDomainData(micBuf);
+  let pk=0,sum=0;
+  for(let i=0;i<micBuf.length;i++){const x=micBuf[i],a=x<0?-x:x;if(a>pk)pk=a;sum+=x*x;}
+  const rms=Math.sqrt(sum/micBuf.length),now=performance.now();
+  const thr=CLAP_THR[clamp(Math.round(settings.clapSens),1,5)-1];
+  micLevel=pk;
+  // tepukan = bunyi yang tiba-tiba keras (bukan suara yang sudah keras dari tadi) dan bukan bunyi game sendiri
+  const hit=pk>thr&&pk>micFloor*6&&pk>micPrev*1.8&&now-lastClap>280&&now>quietUntil;
+  if(hit)lastClap=now;else micFloor=micFloor*.97+rms*.03;
+  micPrev=pk;
+  return hit;
+}
+function handleClap(){
+  clapFlashUntil=performance.now()+400;
+  if(mode==='play'&&started&&!paused&&clapMode()){
+    for(const p of players)if(p.phase==='ask'&&gt>=p.graceUntil&&p.target&&p.target.state==='alive')whack(p,p.target);
+  }else if(!$('setup').hidden&&clapMode()){
+    setCamStatus('Tepukan terdeteksi! Sekarang dekatkan tangan ke virus lalu tepuk.','ok');
   }
 }
 
@@ -1420,7 +1542,7 @@ function nextQuestion(p){
   const items=shuffle([{label:p.curQ.a,correct:true}].concat(p.curQ.wrong.map(w=>({label:w,correct:false}))));
   z.viruses=items.map((it,i)=>makeVirus(z,it,i,items.length,cols[i],p.keys[i]));
   z.mallets=[];
-  p.tLeft=settings.secs;p.phase='ask';p.graceUntil=gt+900;
+  p.tLeft=settings.secs;p.phase='ask';p.graceUntil=gt+(settings.input==='camera'?600:900);
   updateHud(p);
 }
 function whack(p,v){
@@ -1550,7 +1672,7 @@ function finishGame(){
   $('result').hidden=false;
 }
 function toMenu(){
-  stopCamera();releaseWakeLock();Music.stop();
+  stopCamera();stopMic();releaseWakeLock();Music.stop();
   mode='menu';paused=false;started=false;endAt=0;players=[];
   topbar.hidden=true;countEl.hidden=true;zonesEl.replaceChildren();
   hideAllPanels();$('home').hidden=false;
@@ -1568,6 +1690,10 @@ function releaseWakeLock(){try{if(wakeLockRef){wakeLockRef.release();wakeLockRef
 function loop(ts){
   const rdt=Math.min(.05,Math.max(0,(ts-lastTs)/1000));lastTs=ts;
   const dt=paused?0:rdt;gt+=dt*1000;
+  if(micAn){
+    if(pollClap())handleClap();
+    if(!$('setup').hidden){const m=$('micMeter');if(m)m.style.transform='scaleX('+Math.min(1,micLevel/(CLAP_THR[clamp(Math.round(settings.clapSens),1,5)-1]*1.4))+')';}
+  }
   if(mode==='play')updateGame(dt);
   updateEnv(dt);
   for(const z of zones)updateZone(z,dt);
@@ -1580,7 +1706,7 @@ function resize(){
   dpr=Math.min(window.devicePixelRatio||1,1.75);
   W=window.innerWidth;H=window.innerHeight;
   for(const c of [glc,fxc]){c.width=Math.round(W*dpr);c.height=Math.round(H*dpr);}
-  mw=80;mh=clamp(Math.round(80*H/W),24,200);mc.width=mw;mc.height=mh;
+  mw=96;mh=clamp(Math.round(96*H/W),24,200);mc.width=mw;mc.height=mh;
   gCur=new Float32Array(mw*mh);gPrev=new Float32Array(mw*mh);mask=new Uint8Array(mw*mh);motionReady=false;
   if(mode==='play')layoutPlay();else setMenuZone();
 }
@@ -1650,7 +1776,8 @@ function fillSetup(){
   if(settings.cat!=='*'&&cats.indexOf(settings.cat)<0)settings.cat='*';
   sel.value=settings.cat;
   $('setN').value=String(settings.n);$('setSecs').value=String(settings.secs);$('setSame').value=settings.same?'1':'0';
-  $('setCam').value=settings.cam;$('setSens').value=String(settings.sens);
+  $('setCam').value=settings.cam;$('setSens').value=String(settings.sens);$('setMove').value=settings.vmove;$('setAssist').checked=!!settings.assist;
+  $('setClap').value=String(settings.clapSens);$('clapLabel').textContent=SENS_LABELS[settings.clapSens-1]||'Sedang';
   $('setSound').checked=!!settings.sound;$('setMusic').checked=!!settings.music;
   $('sensLabel').textContent=SENS_LABELS[settings.sens-1]||'Sedang';
   document.querySelectorAll('.camOnly').forEach(el=>el.hidden=settings.input!=='camera');
@@ -1669,7 +1796,7 @@ function buildNames(){
 }
 function readSetup(){
   settings.cat=$('setCat').value;settings.n=+$('setN').value;settings.secs=+$('setSecs').value;settings.same=$('setSame').value==='1';
-  settings.cam=$('setCam').value;settings.sens=+$('setSens').value;settings.sound=$('setSound').checked;settings.music=$('setMusic').checked;
+  settings.cam=$('setCam').value;settings.sens=+$('setSens').value;settings.vmove=$('setMove').value;settings.assist=$('setAssist').checked;settings.clapSens=+$('setClap').value;settings.sound=$('setSound').checked;settings.music=$('setMusic').checked;
   saveSettings();
 }
 function buildKeyHelp(){
@@ -1685,27 +1812,29 @@ $('segPlayers').addEventListener('click',e=>{const b=e.target.closest('button');
 $('segInput').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;settings.input=b.dataset.v;setSeg('segInput',settings.input);
   document.querySelectorAll('.camOnly').forEach(el=>el.hidden=settings.input!=='camera');setupMsg('');saveSettings();camPrecheck();});
 $('setSens').addEventListener('input',()=>{$('sensLabel').textContent=SENS_LABELS[(+$('setSens').value)-1];});
-['setCat','setN','setSecs','setSame','setCam','setSens','setSound','setMusic'].forEach(id=>$(id).addEventListener('change',readSetup));
+['setCat','setN','setSecs','setSame','setCam','setSens','setSound','setMusic','setMove','setAssist','setClap'].forEach(id=>$(id).addEventListener('change',readSetup));
 $('setMusic').addEventListener('change',()=>{if(!settings.music)Music.stop();});
 
 $('btnSolo').addEventListener('click',()=>{ensureAudio();solo=true;fillSetup();show('setup');});
 $('btnDuel').addEventListener('click',()=>{ensureAudio();solo=false;fillSetup();show('setup');});
 $('btnHelp').addEventListener('click',()=>show('help'));
 $('helpBack').addEventListener('click',()=>show('home'));
-$('setupBack').addEventListener('click',()=>{stopCamera();show('home');});
+$('setupBack').addEventListener('click',()=>{stopCamera();stopMic();show('home');});
 async function launch(){
   readSetup();ensureAudio();setupMsg('');
   if(settings.input==='camera'){
-    if(!camOn&&!(await testCamera())){if($('setup').hidden)show('setup');return;}
-  }else stopCamera();
+    if((!camOn||(clapMode()&&!micAn))&&!(await testCamera())){if($('setup').hidden)show('setup');return;}
+  }else{stopCamera();stopMic();}
   setupMsg('');startGame();
 }
 $('btnStart').addEventListener('click',launch);
 $('btnCamTest').addEventListener('click',()=>{ensureAudio();testCamera();});
 $('btnCamRetry').addEventListener('click',()=>testCamera());
 $('btnReload').addEventListener('click',()=>location.reload());
-$('btnNoCam').addEventListener('click',()=>{stopCamera();settings.input='touch';saveSettings();setSeg('segInput','touch');
+$('btnNoCam').addEventListener('click',()=>{stopCamera();stopMic();settings.input='touch';saveSettings();setSeg('segInput','touch');
   document.querySelectorAll('.camOnly').forEach(el=>el.hidden=true);hideCamHelp();});
+$('segHit').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;settings.hitMode=b.dataset.v;saveSettings();camPrecheck();});
+$('setClap').addEventListener('input',()=>{$('clapLabel').textContent=SENS_LABELS[(+$('setClap').value)-1];settings.clapSens=+$('setClap').value;});
 $('setCamDev').addEventListener('change',()=>{settings.camId=$('setCamDev').value;saveSettings();testCamera();});
 $('setCam').addEventListener('change',()=>{if(camOn)testCamera();});
 $('btnQuit').addEventListener('click',toMenu);
